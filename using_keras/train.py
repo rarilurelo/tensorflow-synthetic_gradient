@@ -27,6 +27,7 @@ mnist_data = input_data.read_data_sets('MNIST_data', one_hot=True)
 
 train_op = tf.train.AdamOptimizer().minimize(loss)
 with sess.as_default():
+    sess.run(tf.initialize_all_variables())
     for i in range(5000):
         batch = mnist_data.train.next_batch(256)
         train_op.run(feed_dict={x: batch[0], labels: batch[1]})
