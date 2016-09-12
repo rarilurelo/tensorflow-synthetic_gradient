@@ -5,10 +5,41 @@ from keras.layers import BatchNormalization, Dense, Activation
 from keras.models import Sequential
 from keras.objectives import categorical_crossentropy
 from keras.metrics import categorical_accuracy as accuracy
+from keras.optimizers import Optimizer
 import numpy as np
 
 sess = tf.Session()
 K.set_session(sess)
+class Adam(object):
+    def __init__(self, params, lr=0.001, beta_1=0.9, beta_2=0.999,
+                 epsilon=1e-8):
+        self.iterations = K.variable(0.)
+        self.lr = K.variable(lr)
+        self.beta_1 = K.variable(beta_1)
+        self.beta_2 = K.variable(beta_2)
+        self.epsilon = epsilon
+        shapes = [x.shape for x in K.batch_get_value(params)]
+        self.ms = [K.zeros(shape) for shape in shapes]
+        self.vs = [K.zeros(shape) for shape in shapes]
+        sess.run(tf.initialize_variables(self.ms+self.vs))
+
+    def get_updates(self, params, gparams):
+        self.updates = [K.update_add(self.iterations, 1)]
+        t = self.iterations+1.
+        lr_t = self.lr * K.sqrt(1. - K.pow(self.beta_2, t)) / (1. - K.pow(self.beta_1, t))
+
+        for p, g, m, v in zip(params, gparams, self.ms, self.vs):
+            m_t = (self.beta_1 * m) + (1. - self.beta_1) * g
+            v_t = (self.beta_2 * v) + (1. - self.beta_2) * K.square(g)
+            p_t = p - lr_t * m_t / (K.sqrt(v_t) + self.epsilon)
+
+            self.updates.append(K.update(m, m_t))
+            self.updates.append(K.update(v, v_t))
+
+            new_p = p_t
+            self.updates.append(K.update(p, new_p))
+        return self.updates
+
 
 x = tf.placeholder(dtype=tf.float32, shape=[None, 784])
 labels = tf.placeholder(dtype=tf.float32, shape=[None, 10])
@@ -65,6 +96,8 @@ layer1.add(layer2)
 layer_p = layer1
 layer3.add(layer4)
 layer_n = layer3
+params = layer_n.trainable_weights+cDNI2.trainable_weights+layer_p.trainable_weights
+optimizer = Adam(params)
 y_p = layer_p(x)
 p_gy_p = cDNI2(K.concatenate((y_p, labels), axis=1))
 grad_trainable_weights_p = tf.gradients(y_p, layer_p.trainable_weights, grad_ys=p_gy_p)
@@ -78,16 +111,8 @@ loss_dni2 = K.mean(K.sum((p_gy_p-gy_p)**2, 1))
 grad_trainable_weights_dni2 = tf.gradients(loss_dni2, cDNI2.trainable_weights)
 
 with tf.control_dependencies(grad_trainable_weights_dni2+grad_trainable_weights_p+grad_trainable_weights_n):
-    update_n = []
-    for weight, grad in zip(layer_n.trainable_weights, grad_trainable_weights_n):
-        update_n.append(tf.assign(weight, weight-lr*grad))
-    update_dni2 = []
-    for weight, grad in zip(cDNI2.trainable_weights, grad_trainable_weights_dni2):
-        update_dni2.append(tf.assign(weight, weight-lr*grad))
-    update_p = []
-    for weight, grad in zip(layer_p.trainable_weights, grad_trainable_weights_p):
-        update_p.append(tf.assign(weight, weight-lr*grad))
-updates = update_n+update_dni2+update_p
+    gparams = grad_trainable_weights_n+grad_trainable_weights_dni2+grad_trainable_weights_p
+    updates = optimizer.get_updates(params, gparams)
 
 acc = accuracy(labels, y_n)
 
@@ -100,7 +125,7 @@ with sess.as_default():
     for i in range(500000):
         batch = mnist_data.train.next_batch(256)
         sess.run(updates, feed_dict={x: batch[0], labels: batch[1], K.learning_phase(): 1})
-        if i%10 == 0:
+        if i%100 == 0:
             print "epoch: {}".format(256*i//len(mnist_data.train.images))
             print "acc: {}".format(acc.eval(feed_dict={x: mnist_data.test.images, labels: mnist_data.test.labels, K.learning_phase(): 0}))
             print "loss: {}".format(loss.eval({x: mnist_data.test.images, labels: mnist_data.test.labels, K.learning_phase(): 0}))
