@@ -39,6 +39,7 @@ class Adam(object):
 
 sess = tf.Session()
 K.set_session(sess)
+
 x = tf.placeholder(dtype=tf.float32, shape=[None, 784])
 labels = tf.placeholder(dtype=tf.float32, shape=[None, 10])
 
@@ -62,14 +63,14 @@ layer4 = Sequential()
 layer4.add(Dense(10, activation='softmax', input_dim=256))
 
 # cDNI1 belongs to Layer2, so it accepts Layer1's output and emmits grad_y of Layer1
-#cDNI1 = Sequential()
-#cDNI1.add(Dense(1024, input_dim=256+10))
-#cDNI1.add(BatchNormalization(mode=2))
-#cDNI1.add(Activation('relu'))
-#cDNI1.add(Dense(1024))
-#cDNI1.add(BatchNormalization(mode=2))
-#cDNI1.add(Activation('relu'))
-#cDNI1.add(Dense(256, weights=[np.zeros(shape=[1024, 256])], bias=False))
+cDNI1 = Sequential()
+cDNI1.add(Dense(1024, input_dim=256+10))
+cDNI1.add(BatchNormalization(mode=2))
+cDNI1.add(Activation('relu'))
+cDNI1.add(Dense(1024))
+cDNI1.add(BatchNormalization(mode=2))
+cDNI1.add(Activation('relu'))
+cDNI1.add(Dense(256, weights=[np.zeros(shape=[1024, 256])], bias=False))
 # cDNI2 belongs Layer3
 cDNI2 = Sequential()
 cDNI2.add(Dense(1024, input_dim=256+10))
@@ -80,39 +81,51 @@ cDNI2.add(BatchNormalization(mode=2))
 cDNI2.add(Activation('relu'))
 cDNI2.add(Dense(256, weights=[np.zeros(shape=[1024, 256])], bias=False))
 # cDNI3 belongs Layer4
-#cDNI3 = Sequential()
-#cDNI3.add(Dense(1024, input_dim=256+10))
-#cDNI3.add(BatchNormalization(mode=2))
-#cDNI3.add(Activation('relu'))
-#cDNI3.add(Dense(1024))
-#cDNI3.add(BatchNormalization(mode=2))
-#cDNI3.add(Activation('relu'))
-#cDNI3.add(Dense(256, weights=[np.zeros(shape=[1024, 256])], bias=False))
+cDNI3 = Sequential()
+cDNI3.add(Dense(1024, input_dim=256+10))
+cDNI3.add(BatchNormalization(mode=2))
+cDNI3.add(Activation('relu'))
+cDNI3.add(Dense(1024))
+cDNI3.add(BatchNormalization(mode=2))
+cDNI3.add(Activation('relu'))
+cDNI3.add(Dense(256, weights=[np.zeros(shape=[1024, 256])], bias=False))
 
-layer1.add(layer2)
-layer_p = layer1
-layer3.add(layer4)
-layer_n = layer3
-params = layer_n.trainable_weights+cDNI2.trainable_weights+layer_p.trainable_weights
+params = layer1.trainable_weights+cDNI1.trainable_weights+layer2.trainable_weights+cDNI2.trainable_weights+layer3.trainable_weights+cDNI3.trainable_weights+layer4.trainable_weights
 optimizer = Adam(params)
 
-y_p = layer_p(x)
-p_gy_p = cDNI2(K.concatenate((y_p, labels), axis=1))
-grad_trainable_weights_p = tf.gradients(y_p, layer_p.trainable_weights, grad_ys=p_gy_p)
+y_l1 = layer1(x)
+p_gy_l1 = cDNI1(K.concatenate((y_l1, labels), axis=1))
+grad_trainable_weights_l1 = tf.gradients(y_l1, layer1.trainable_weights, grad_ys=p_gy_l1)
 
-x_n = y_p
-y_n = layer_n(x_n)
-loss = K.mean(categorical_crossentropy(labels, y_n))
-grad_trainable_weights_n = tf.gradients(loss, layer_n.trainable_weights)
-gy_p = tf.gradients(loss, y_p)
-loss_dni2 = K.mean(K.sum((p_gy_p-gy_p)**2, 1))
+x_l2 = y_l1
+y_l2 = layer2(x_l2)
+p_gy_l2 = cDNI2(K.concatenate((y_l2, labels), axis=1))
+gy_l1 = tf.gradients(y_l2, y_l1, grad_ys=p_gy_l2)[0]
+loss_dni1 = K.mean(K.sum((p_gy_l1-gy_l1)**2, 1))
+grad_trainable_weights_dni1 = tf.gradients(loss_dni1, cDNI1.trainable_weights)
+grad_trainable_weights_l2 = tf.gradients(y_l2, layer2.trainable_weights, grad_ys=p_gy_l2)
+
+x_l3 = y_l2
+y_l3 = layer3(x_l3)
+p_gy_l3 = cDNI3(K.concatenate((y_l3, labels), axis=1))
+gy_l2 = tf.gradients(y_l3, y_l2, grad_ys=p_gy_l3)[0]
+loss_dni2 = K.mean(K.sum((p_gy_l2-gy_l2)**2, 1))
 grad_trainable_weights_dni2 = tf.gradients(loss_dni2, cDNI2.trainable_weights)
+grad_trainable_weights_l3 = tf.gradients(y_l3, layer3.trainable_weights, grad_ys=p_gy_l3)
 
-with tf.control_dependencies(grad_trainable_weights_dni2+grad_trainable_weights_p+grad_trainable_weights_n):
-    gparams = grad_trainable_weights_n+grad_trainable_weights_dni2+grad_trainable_weights_p
+x_l4 = y_l3
+y_l4 = layer4(x_l4)
+loss = K.mean(categorical_crossentropy(labels, y_l4))
+gy_l3 = tf.gradients(loss, y_l3)[0]
+loss_dni3 = K.mean(K.sum((p_gy_l3-gy_l3)**2, 1))
+grad_trainable_weights_dni3 = tf.gradients(loss_dni3, cDNI3.trainable_weights)
+grad_trainable_weights_l4 = tf.gradients(loss, layer4.trainable_weights)
+
+gparams = grad_trainable_weights_l1+grad_trainable_weights_dni1+grad_trainable_weights_l2+grad_trainable_weights_dni2+grad_trainable_weights_l3+grad_trainable_weights_dni3+grad_trainable_weights_l4
+with tf.control_dependencies(gparams):
     updates = optimizer.get_updates(params, gparams)
 
-acc = accuracy(labels, y_n)
+acc = accuracy(labels, y_l4)
 
 
 
@@ -123,7 +136,7 @@ with sess.as_default():
     for i in range(500000):
         batch = mnist_data.train.next_batch(256)
         sess.run(updates, feed_dict={x: batch[0], labels: batch[1], K.learning_phase(): 1})
-        if i%100 == 0:
+        if i%1000 == 0:
             print "epoch: {}".format(256*i//len(mnist_data.train.images))
             print "acc: {}".format(acc.eval(feed_dict={x: mnist_data.test.images, labels: mnist_data.test.labels, K.learning_phase(): 0}))
             print "loss: {}".format(loss.eval({x: mnist_data.test.images, labels: mnist_data.test.labels, K.learning_phase(): 0}))
